@@ -10,9 +10,25 @@ from gbcli.utils.gbcredentials import (
     GBConfig,
 )
 from gbcli.utils.gbserver import get_remote_spaces
-from gbcommon.types.gbenvconfig import gb_environment_config, is_standalone
+from gbcommon.types.gbenvconfig import gb_environment_config
 
 logger = logging.getLogger(__name__)
+
+
+def has_local_profile_store() -> bool:
+    """Return True if this environment keeps spaces/profiles in ~/.gbcli/config.
+
+    An environment with empty ``config_spaces``/``config_profile`` has nowhere to
+    read or write that state, so spaces must be resolved live from gbserver. That
+    covers STANDALONE and any environment registered at runtime for an external
+    deployment — the built-in PROD/STAGING/DEV keep non-empty section names and so
+    keep using the local profile store.
+
+    This replaces an earlier ``is_standalone()`` test: the property that matters is
+    whether a profile store exists, not which environment is selected.
+    """
+    config = gb_environment_config()
+    return bool(config.config_spaces and config.config_profile)
 
 
 def check_and_set_spaces_profile(remote_spaces, config_section):
@@ -70,9 +86,9 @@ def resolve_space(github_token: str, space=None, callback=None):
 
     updated_spaces = get_spaces(github_token, callback)
 
-    # In standalone mode, get_spaces() returns remote spaces directly.
+    # Without a local profile store, get_spaces() returns remote spaces directly.
     # Resolve space by name without going through the profile layer.
-    if is_standalone():
+    if not has_local_profile_store():
         space_name = (
             gb_environment_config().default_space
             if (not space or space == "default")
@@ -199,9 +215,9 @@ def get_spaces(github_token: str, callback=None):
     """
     makes a call to gbserver if new spaces are needed from remote
     """
-    if is_standalone():
-        # In standalone mode, skip caching and always fetch directly from gbserver.
-        logger.info("fetching user spaces from GBSERVER (standalone)")
+    if not has_local_profile_store():
+        # No local profile store to cache into — always fetch directly from gbserver.
+        logger.info("fetching user spaces from GBSERVER (no local profile store)")
         return get_remote_spaces(github_token, callback)
 
     try:

@@ -14,11 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``gb space list --refresh`` is blocked in standalone mode.
+"""``gb space list --refresh`` is blocked for environments with no local profile store.
 
-In standalone mode spaces are always fetched fresh from the local gbserver and the local
-cache/profile that ``--refresh`` repopulates is never used (writing it would also corrupt
-~/.gbcli/config). The flag should warn and exit non-zero instead.
+Such an environment (STANDALONE, or one registered at runtime for an external deployment)
+always fetches spaces fresh from gbserver, and the local cache/profile that ``--refresh``
+repopulates is never used — writing it would also corrupt ~/.gbcli/config, which has no
+spaces section. The flag should warn and exit non-zero instead.
 """
 
 import importlib
@@ -27,7 +28,7 @@ from click.testing import CliRunner
 
 # Assert against result.output (combined stdout+stderr): CliRunner mixes the streams by
 # default on Click 8.1.x, where accessing result.stderr raises.
-WARNING_FRAGMENT = "'--refresh' is currently not supported in standalone mode"
+WARNING_FRAGMENT = "'--refresh' is not supported for this environment"
 
 
 def _space_cli():
@@ -52,6 +53,38 @@ class TestSpaceRefreshStandalone:
         assert (
             WARNING_FRAGMENT in result.output
         ), f"expected --refresh standalone warning, got: {result.output!r}"
+
+    def test_refresh_blocked_for_runtime_registered_env(self, monkeypatch):
+        """The guard is driven by the config, not the STANDALONE name.
+
+        A runtime-registered environment also has empty config_spaces/config_profile, so
+        --refresh must be blocked there too — otherwise gbcli would try to write a spaces
+        section that the environment does not define.
+        """
+        from gbcommon.types import gbenvconfig
+
+        monkeypatch.setattr(
+            gbenvconfig, "_LOADED_EXTRA_ENVIRONMENT_CONFIGS", False, raising=False
+        )
+        monkeypatch.setenv("GB_ENV_NAME", "ACMETEST")
+        monkeypatch.setenv("GB_ENV_LAKEHOUSE_ENVIRONMENT", "STAGING")
+        monkeypatch.setenv("GB_ENV_GBSERVER_HOST", "http://127.0.0.1:1")
+        gbenvconfig.load_extra_environment_configs()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            _space_cli(),
+            ["list", "--all", "--refresh", "--skip-version-check"],
+            env={"GB_ENVIRONMENT": "ACMETEST"},
+        )
+
+        assert result.exit_code != 0, (
+            f"'space list --all --refresh' should exit non-zero for an environment with "
+            f"no local profile store, got {result.exit_code}"
+        )
+        assert (
+            WARNING_FRAGMENT in result.output
+        ), f"expected --refresh warning, got: {result.output!r}"
 
     def test_refresh_not_blocked_outside_standalone(self):
         """Outside standalone the --refresh guard must not fire (no warning)."""

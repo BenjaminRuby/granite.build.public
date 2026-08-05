@@ -12,12 +12,16 @@ from gbcli.commands.common_options import (
     common_options,
     pass_context_and_reject_standalone,
 )
-from gbcli.utils.gbconstants import CLIPBOARD_CHAR, PROJECT_NAME, SPACE_LIST_HEADERS
+from gbcli.utils.gbconstants import (
+    CLIPBOARD_CHAR,
+    PROJECT_NAME,
+    SPACE_LIST_HEADERS,
+    gb_environment,
+)
 from gbcli.utils.gbcredentials import get_user_token
-from gbcli.utils.spaceutil import get_spaces
+from gbcli.utils.spaceutil import get_spaces, has_local_profile_store
 from gbcli.utils.utils import render_plain, render_pretty
 from gbcli.utils.versionutil import check_current_and_latest_versions
-from gbcommon.types.gbenvconfig import is_standalone
 
 
 @click.group("space")
@@ -65,14 +69,15 @@ def list(
         )
         ctx.exit(1)  # Exit with a non-zero status
 
-    if refresh and is_standalone():
-        # In standalone mode spaces are always fetched fresh from the local gbserver,
-        # and the local cache/profile that --refresh repopulates is never used (it would
-        # also corrupt ~/.gbcli/config because the standalone config has no spaces
-        # section). Block the flag with a clear message instead.
+    if refresh and not has_local_profile_store():
+        # This environment has no spaces/profile section in ~/.gbcli/config, so spaces
+        # are always fetched fresh from gbserver and the local cache that --refresh
+        # repopulates is never used (writing it would also corrupt the config, which
+        # has no spaces section). Block the flag with a clear message instead.
         click.echo(
-            "❌ Error: '--refresh' is currently not supported in standalone mode "
-            "(spaces are always fetched fresh from the local gbserver).",
+            "❌ Error: '--refresh' is not supported for this environment "
+            f"('{gb_environment()}' has no local spaces cache; "
+            "spaces are always fetched fresh from gbserver).",
             err=True,
         )
         ctx.exit(1)  # Exit with a non-zero status

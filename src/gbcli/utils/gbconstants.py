@@ -12,6 +12,8 @@ from gbcommon.types.gbenvconfig import (
     gb_env_normalize,
     gb_environment_config,
     getenv_boolean,
+    is_registered_environment,
+    load_extra_environment_configs,
 )
 
 logger = logging.getLogger(__name__)
@@ -24,7 +26,17 @@ GB_ENVIRONMENT_DEFAULT = "PROD"
 
 
 def gb_env_formating(value: str, type: str) -> str:
-    """Normalize env name with sys.exit on invalid input (CLI behavior)."""
+    """Normalize env name with sys.exit on invalid input (CLI behavior).
+
+    An environment registered at runtime (see ``load_extra_environment_configs``)
+    is returned unchanged: ``gb_env_normalize`` only knows the built-in names, so
+    without this check a valid custom environment would reach ``sys.exit`` and
+    terminate the process — fatal for a long-running server that embeds gbcli.
+    Genuinely invalid names still exit, preserving CLI behavior.
+    """
+    load_extra_environment_configs()
+    if is_registered_environment(value):
+        return value
     try:
         return gb_env_normalize(value, type)
     except ValueError as e:
