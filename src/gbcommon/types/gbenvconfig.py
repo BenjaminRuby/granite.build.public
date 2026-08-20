@@ -73,8 +73,12 @@ class GBEnvConfig(BaseModel):
     env: str
     """The GB env name. One of PROD, STAGING, DEV, or STANDALONE."""
 
-    lakehouse_environment: str
-    """The lakehouse environment to use. One of PROD or STAGING."""
+    lakehouse_environment: str = ""
+    """The lakehouse environment (PROD or STAGING) when this environment uses
+    Lakehouse asset stores. Optional: leave empty for a deployment that does not
+    use Lakehouse (e.g. STANDALONE or a runtime-registered external gbserver). The
+    ``LAKEHOUSE_ENVIRONMENT`` env var still overrides this for any process that
+    does perform a Lakehouse operation."""
 
     feature_flags: Dict[str, bool] = {}
     """Feature flags for this environment."""

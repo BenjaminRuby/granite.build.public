@@ -88,6 +88,21 @@ class TestInlineRegistration:
         assert config.gbserver_host == "http://acme.example.com:8080"
         assert is_registered_environment("ACME")
 
+    def test_lakehouse_environment_is_optional(self, monkeypatch):
+        """A deployment that does not use Lakehouse can omit GB_ENV_LAKEHOUSE_ENVIRONMENT.
+
+        GB_ENV_NAME alone is enough to register the environment; the field defaults to
+        "" (same state STANDALONE runs in) rather than making registration fail.
+        """
+        monkeypatch.setenv("GB_ENV_NAME", "ACME")
+        monkeypatch.setenv("GB_ENV_GBSERVER_HOST", "http://acme.example.com:8080")
+
+        config = load_extra_environment_configs()
+
+        assert isinstance(config, GBEnvConfig)
+        assert config.env == "ACME"
+        assert config.lakehouse_environment == ""
+
     def test_maps_all_model_fields_generically(self, monkeypatch):
         """Every GBEnvConfig field is settable as GB_ENV_<FIELD_NAME_UPPER>.
 
