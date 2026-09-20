@@ -280,28 +280,50 @@ def gb_env_normalize(value: Optional[str], source: str = "input") -> Optional[st
         raise ValueError(f"Error: {source} has invalid value '{value}'")
 
 
+def resolve_registered_environment(value: Optional[str]) -> Optional[str]:
+    """Return the canonical registry key matching value, case-insensitively.
+
+    Built-in name resolution (``gb_env_normalize``) is case-insensitive, so
+    custom names registered at runtime match the same way: ``acme`` resolves the
+    same environment as ``ACME``. Returns the registered key (preserving the
+    casing it was registered under) so callers get a canonical value, or None if
+    nothing matches.
+    """
+    if not value:
+        return None
+    if value in _GB_ENVIRONMENT_CONFIGS:
+        return value
+    lowered = value.lower()
+    for key in _GB_ENVIRONMENT_CONFIGS:
+        if key.lower() == lowered:
+            return key
+    return None
+
+
 def is_registered_environment(value: Optional[str]) -> bool:
     """Return True if value names an environment present in the config table.
 
-    Used to let a runtime-registered environment name (see
+    Matches case-insensitively (see ``resolve_registered_environment``). Used to
+    let a runtime-registered environment name (see
     ``load_extra_environment_configs``) bypass ``gb_env_normalize``, which only
     knows the built-in names and their aliases.
     """
-    return bool(value) and value in _GB_ENVIRONMENT_CONFIGS
+    return resolve_registered_environment(value) is not None
 
 
 def gb_environment() -> str:
     """Read GB_ENVIRONMENT env var, normalize, default to PROD.
 
-    A name registered at runtime is returned as-is; anything else goes through
-    ``gb_env_normalize``, so aliases still resolve and typos still raise. The
-    loader runs first so this works regardless of which entry point a caller
-    reaches initially.
+    A name registered at runtime resolves to its canonical registry key
+    (case-insensitively); anything else goes through ``gb_env_normalize``, so
+    aliases still resolve and typos still raise. The loader runs first so this
+    works regardless of which entry point a caller reaches initially.
     """
     load_extra_environment_configs()
     raw = os.environ.get("GB_ENVIRONMENT")
-    if is_registered_environment(raw):
-        return raw
+    registered = resolve_registered_environment(raw)
+    if registered is not None:
+        return registered
     normalized = gb_env_normalize(raw, "Environment variable GB_ENVIRONMENT")
     return normalized if normalized else DEFAULT_GB_ENVIRONMENT
 
@@ -315,12 +337,13 @@ def gb_environment_config(gb_env: Optional[str] = None) -> GBEnvConfig:
     load_extra_environment_configs()
     if not gb_env:
         gb_env = gb_environment()
-    if gb_env not in _GB_ENVIRONMENT_CONFIGS:
+    registered = resolve_registered_environment(gb_env)
+    if registered is None:
         valid_keys = list(_GB_ENVIRONMENT_CONFIGS.keys())
         raise ValueError(
             f"unknown GB environment: {gb_env}, expected one of {valid_keys}"
         )
-    return _GB_ENVIRONMENT_CONFIGS[gb_env]
+    return _GB_ENVIRONMENT_CONFIGS[registered]
 
 
 def is_standalone() -> bool:
@@ -333,9 +356,11 @@ def add_environment_config(config_dict: Dict) -> GBEnvConfig:
     config = GBEnvConfig.model_validate(config_dict)
     if config.env in _GB_ENVIRONMENT_CONFIGS:
         old = _GB_ENVIRONMENT_CONFIGS[config.env]
-        print(
-            f"[WARNING] the environment config '{config.env}'"
-            + f" already exists: {old} , overwriting with {config}"
+        logger.warning(
+            "the environment config '%s' already exists: %s, overwriting with %s",
+            config.env,
+            old,
+            config,
         )
     _GB_ENVIRONMENT_CONFIGS[config.env] = config
     return config

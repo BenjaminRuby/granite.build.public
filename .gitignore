@@ -118,6 +118,11 @@ ipython_config.py
 #   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
 #poetry.lock
 
+# uv
+#   uv.lock resolves against the package indexes configured for a given install,
+#   so it is not portable between environments and is not tracked here.
+uv.lock
+
 # pdm
 #   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
 #pdm.lock

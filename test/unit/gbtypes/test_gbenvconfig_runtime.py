@@ -275,6 +275,20 @@ class TestEnvironmentNameTolerance:
         assert gb_environment() == "ACME"
         assert gb_environment_config().env == "ACME"
 
+    def test_custom_name_matches_case_insensitively(self, monkeypatch):
+        """A custom name resolves regardless of the case used in GB_ENVIRONMENT.
+
+        Built-in names accept aliases like ``prod``/``PROD``; custom names match
+        the same way and resolve to their canonical registered key.
+        """
+        monkeypatch.setenv("GB_ENV_NAME", "ACME")
+        monkeypatch.setenv("GB_ENV_LAKEHOUSE_ENVIRONMENT", "STAGING")
+        monkeypatch.setenv("GB_ENVIRONMENT", "acme")
+
+        assert gb_environment() == "ACME"
+        assert gb_environment_config().env == "ACME"
+        assert gb_environment_config("Acme").env == "ACME"
+
     def test_gb_environment_config_loads_lazily(self, monkeypatch):
         """A custom GB_ENVIRONMENT resolves even without an explicit loader call."""
         monkeypatch.setenv("GB_ENV_NAME", "LAZY")
