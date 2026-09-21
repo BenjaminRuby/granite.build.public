@@ -3,11 +3,13 @@
 > **Audience:** operators choosing which deployment a gbserver process targets. For the env-var list see
 > [environment-variables.md](environment-variables.md).
 
-`GB_ENVIRONMENT` selects a **built-in per-environment config** that supplies defaults for the cluster,
-namespace, SQL schema, and space git branches. The four values are `DEV`, `STAGING`,
+`GB_ENVIRONMENT` selects a **per-environment config** that supplies defaults for the cluster,
+namespace, SQL schema, and space git branches. The four built-in values are `DEV`, `STAGING`,
 `PROD`, and `STANDALONE`; the config objects live in
 [`src/gbcommon/types/gbenvconfig.py`](../../src/gbcommon/types/gbenvconfig.py) (default: `PROD`). These
-are defaults — individual environment variables still override them.
+are defaults — individual environment variables still override them. You can also
+[register an additional environment at runtime](#runtime-registered-environments) to target a gbserver
+deployment that is not one of the built-ins.
 
 | Aspect | `PROD` | `STAGING` | `DEV` | `STANDALONE` |
 |--------|--------|-----------|-------|--------------|
@@ -45,6 +47,47 @@ the **SQLite** storage factory (migrating any legacy database first), installs t
 access manager** (which bypasses remote authorization), and — for the standalone *server* — registers
 the `--space-dir` space under `public` (and the legacy aliases `standalone` / `local`). Outside standalone
 the function is a no-op.
+
+## Runtime-registered environments
+
+To point the client at a gbserver deployment that is not one of the four built-ins — an external or
+customer-hosted instance — register an environment from the process environment. No code change and no
+fork required. Registration happens in
+[`load_extra_environment_configs()`](../../src/gbcommon/types/gbenvconfig.py).
+
+**Registering an environment also selects it**, so the common case sets one variable, not two:
+
+```bash
+export GB_ENV_CONFIG_NAME=ACME
+export GB_ENV_GBSERVER_HOST=https://gbserver.acme.example.com
+gb space list --all          # runs against ACME
+```
+
+Or keep the whole config in a file (YAML or JSON — JSON is a subset of YAML, so one parser reads both):
+
+```bash
+export GB_ENV_CONFIG_FILE=/etc/gb/acme.yaml   # the file's `env:` key names the environment
+gb space list --all
+```
+
+| Variable | Purpose |
+|----------|---------|
+| `GB_ENV_CONFIG_NAME` | Names the environment being defined, and triggers inline registration. |
+| `GB_ENV_CONFIG_FILE` | Path to a YAML/JSON mapping holding the whole config. Takes precedence over the inline variables. |
+| `GB_ENV_<FIELD>` | Sets any single `GBEnvConfig` field, e.g. `GB_ENV_GBSERVER_HOST`, `GB_ENV_DEFAULT_SPACE`, `GB_ENV_WEB_UI_URL`. The mapping is generated from the model, so every field is settable. |
+| `GB_ENV_FEATURE_FLAGS` | All feature flags at once, as a JSON object: `{"gbserver_build_events": true}`. |
+| `GB_ENV_FEATURE_FLAG_<NAME>` | One flag, applied on top of the JSON above — override a single flag without restating the object. |
+
+`GB_ENVIRONMENT` still wins if you set it, so it remains available as an override; when it names a
+different environment than the one registered, that divergence is logged as a warning rather than
+silently changing which backend you reach. Unset it to use the registered environment.
+
+Fields you don't set stay empty, which is meaningful for two of them: an environment with empty
+`config_spaces`/`config_profile` has no spaces section in `~/.gbcli/config`, so spaces are always
+resolved live from gbserver instead of from a local profile cache (the same way `STANDALONE` behaves).
+`gb space list --refresh` is rejected for such an environment, because the cache it would repopulate is
+never read. A malformed config — an unreadable `GB_ENV_CONFIG_FILE`, a file that isn't a mapping, or
+invalid feature-flag JSON — fails at startup rather than falling back to a built-in environment.
 
 ## See also
 

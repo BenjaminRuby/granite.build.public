@@ -13,7 +13,8 @@ important ones by concern. Defaults shown are the built-in values (before any `G
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `GB_ENVIRONMENT` | `PROD` | Deployment environment: `DEV` / `STAGING` / `PROD` / `STANDALONE`. See [gb-environment.md](gb-environment.md). |
+| `GB_ENVIRONMENT` | `PROD` | Deployment environment: `DEV` / `STAGING` / `PROD` / `STANDALONE`, or a runtime-registered name. See [gb-environment.md](gb-environment.md). |
+| `GB_ENV_CONFIG_NAME` / `GB_ENV_CONFIG_FILE` / `GB_ENV_<FIELD>` | — | Register an additional environment at runtime, to target a gbserver deployment that is not one of the built-ins. Registering also selects it, so `GB_ENVIRONMENT` is not needed. See [runtime-registered environments](gb-environment.md#runtime-registered-environments). |
 | `GBSERVER_METADATA_STORAGE` | `sql` | Metadata backend: `sql` (PostgreSQL) or `sqlite`. |
 | `GBSERVER_DEFAULT_BUILDRUNNER_TYPE` | `job` | `job` (k8s), `process`, or `thread`. |
 | `GBSERVER_DEFAULT_LOG_LEVEL` | `info` | `debug`/`info`/`warning`/`error`/`critical`. |

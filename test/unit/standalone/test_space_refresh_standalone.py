@@ -54,7 +54,7 @@ class TestSpaceRefreshStandalone:
             WARNING_FRAGMENT in result.output
         ), f"expected --refresh standalone warning, got: {result.output!r}"
 
-    def test_refresh_blocked_for_runtime_registered_env(self, monkeypatch):
+    def test_refresh_blocked_for_runtime_registered_env(self, monkeypatch, request):
         """The guard is driven by the config, not the STANDALONE name.
 
         A runtime-registered environment also has empty config_spaces/config_profile, so
@@ -63,10 +63,25 @@ class TestSpaceRefreshStandalone:
         """
         from gbcommon.types import gbenvconfig
 
+        # monkeypatch restores the module globals below, but not the registry dict the
+        # loader writes into — an ACMETEST entry left there would make the next test
+        # resolve a registered environment it never asked for.
+        original_registry = dict(gbenvconfig._GB_ENVIRONMENT_CONFIGS)
+
+        def _restore_registry():
+            gbenvconfig._GB_ENVIRONMENT_CONFIGS.clear()
+            gbenvconfig._GB_ENVIRONMENT_CONFIGS.update(original_registry)
+
+        request.addfinalizer(_restore_registry)
+
         monkeypatch.setattr(
             gbenvconfig, "_LOADED_EXTRA_ENVIRONMENT_CONFIGS", False, raising=False
         )
-        monkeypatch.setenv("GB_ENV_NAME", "ACMETEST")
+        monkeypatch.setattr(gbenvconfig, "_REGISTERED_ENV_NAME", None, raising=False)
+        monkeypatch.setattr(
+            gbenvconfig, "_WARNED_ENV_SELECTION_MISMATCH", False, raising=False
+        )
+        monkeypatch.setenv("GB_ENV_CONFIG_NAME", "ACMETEST")
         monkeypatch.setenv("GB_ENV_LAKEHOUSE_ENVIRONMENT", "STAGING")
         monkeypatch.setenv("GB_ENV_GBSERVER_HOST", "http://127.0.0.1:1")
         gbenvconfig.load_extra_environment_configs()

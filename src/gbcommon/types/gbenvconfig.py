@@ -312,20 +312,63 @@ def is_registered_environment(value: Optional[str]) -> bool:
 
 
 def gb_environment() -> str:
-    """Read GB_ENVIRONMENT env var, normalize, default to PROD.
+    """Resolve the selected GB environment name.
 
-    A name registered at runtime resolves to its canonical registry key
-    (case-insensitively); anything else goes through ``gb_env_normalize``, so
-    aliases still resolve and typos still raise. The loader runs first so this
-    works regardless of which entry point a caller reaches initially.
+    Resolution order:
+
+    1. ``GB_ENVIRONMENT``, when set. A name registered at runtime resolves to its
+       canonical registry key (case-insensitively); anything else goes through
+       ``gb_env_normalize``, so built-in aliases still resolve and typos still raise.
+    2. Otherwise the environment registered by ``load_extra_environment_configs``, if
+       any. Registering an environment therefore *selects* it, matching what
+       ``gbserver.types.gbserverenvconfig.load_extra_server_runtime_configs`` already
+       does for ``--server-runtime-config``: a deployment sets one variable, not two.
+    3. Otherwise ``DEFAULT_GB_ENVIRONMENT``.
+
+    ``GB_ENVIRONMENT`` still wins over a registered name so an operator can override the
+    selection, but disagreeing values are almost always a mistake, so the first
+    divergence is logged — silently running against a different backend than the one just
+    configured is the failure mode this warning exists to prevent.
+
+    The loader runs first so all of the above works regardless of which entry point a
+    caller reaches initially.
     """
+    global _WARNED_ENV_SELECTION_MISMATCH  # pylint: disable=global-statement
     load_extra_environment_configs()
     raw = os.environ.get("GB_ENVIRONMENT")
+
+    if not raw:
+        # Nothing selected explicitly: a registered environment selects itself.
+        return _REGISTERED_ENV_NAME or DEFAULT_GB_ENVIRONMENT
+
     registered = resolve_registered_environment(raw)
-    if registered is not None:
-        return registered
-    normalized = gb_env_normalize(raw, "Environment variable GB_ENVIRONMENT")
-    return normalized if normalized else DEFAULT_GB_ENVIRONMENT
+    selected = (
+        registered
+        if registered is not None
+        else gb_env_normalize(raw, "Environment variable GB_ENVIRONMENT")
+    )
+    if not selected:
+        selected = DEFAULT_GB_ENVIRONMENT
+
+    if (
+        _REGISTERED_ENV_NAME is not None
+        and selected != _REGISTERED_ENV_NAME
+        and not _WARNED_ENV_SELECTION_MISMATCH
+    ):
+        _WARNED_ENV_SELECTION_MISMATCH = True
+        logger.warning(
+            "GB environment '%s' was registered (via %s/%s), but GB_ENVIRONMENT='%s'"
+            " selects '%s', so '%s' is being used. Unset GB_ENVIRONMENT to use the"
+            " registered environment.",
+            _REGISTERED_ENV_NAME,
+            GB_ENV_CONFIG_NAME_VAR,
+            GB_ENV_CONFIG_FILE_VAR,
+            raw,
+            selected,
+            selected,
+        )
+
+    return selected
 
 
 def gb_environment_config(gb_env: Optional[str] = None) -> GBEnvConfig:
@@ -370,9 +413,23 @@ def add_environment_config(config_dict: Dict) -> GBEnvConfig:
 
 _LOADED_EXTRA_ENVIRONMENT_CONFIGS = False
 
+# Name of the environment registered by the loader, remembered across calls because the
+# loader itself runs only once but ``gb_environment`` is called repeatedly (every
+# ``is_standalone()`` site) and must resolve identically every time.
+_REGISTERED_ENV_NAME: Optional[str] = None
+
+# True once the GB_ENVIRONMENT/registered-name mismatch warning has been emitted, so the
+# warning appears once per process rather than on every ``gb_environment()`` call.
+_WARNED_ENV_SELECTION_MISMATCH = False
+
+# The two "meta" variables below share one flat namespace with the generic
+# ``GB_ENV_<FIELD>`` family built from GBEnvConfig.model_fields, so their suffixes must
+# never match a model field name: GB_ENV_CONFIG_NAME is safe only while the model has no
+# ``config_name`` field, and GB_ENV_CONFIG_FILE only while it has no ``config_file``
+# field (it does have ``config_spaces`` and ``config_profile``). A test asserts this.
 GB_ENV_CONFIG_FILE_VAR = "GB_ENV_CONFIG_FILE"
+GB_ENV_CONFIG_NAME_VAR = "GB_ENV_CONFIG_NAME"
 GB_ENV_VAR_PREFIX = "GB_ENV_"
-GB_ENV_NAME_VAR = "GB_ENV_NAME"
 GB_ENV_FEATURE_FLAGS_VAR = "GB_ENV_FEATURE_FLAGS"
 GB_ENV_FEATURE_FLAG_PREFIX = "GB_ENV_FEATURE_FLAG_"
 
@@ -441,9 +498,9 @@ def _collect_inline_env_config() -> Optional[Dict]:
 
     Maps generically over ``GBEnvConfig.model_fields`` — every field is settable as
     ``GB_ENV_<FIELD_NAME_UPPER>`` — so fields added to the model later are picked up
-    without touching this function. Returns None when GB_ENV_NAME is unset.
+    without touching this function. Returns None when GB_ENV_CONFIG_NAME is unset.
     """
-    env_name = os.environ.get(GB_ENV_NAME_VAR)
+    env_name = os.environ.get(GB_ENV_CONFIG_NAME_VAR)
     if not env_name:
         return None
 
@@ -502,7 +559,10 @@ def load_extra_environment_configs() -> Optional[GBEnvConfig]:
 
     Sources, in precedence order:
       1. ``GB_ENV_CONFIG_FILE=/path/to/config.(yaml|json)`` — a full config mapping.
-      2. Inline ``GB_ENV_*`` variables, triggered by ``GB_ENV_NAME``.
+      2. Inline ``GB_ENV_*`` variables, triggered by ``GB_ENV_CONFIG_NAME``.
+
+    A registered environment is also *selected* by ``gb_environment`` unless
+    ``GB_ENVIRONMENT`` says otherwise, so a deployment sets one variable rather than two.
 
     Runs at most once per process; later calls are no-ops returning None. Returns
     None when neither source is configured. Raises ValueError on a malformed
@@ -510,9 +570,11 @@ def load_extra_environment_configs() -> Optional[GBEnvConfig]:
     than silently fall back to a built-in environment.
 
     Callers that read module-level constants derived from the env config must call
-    this **before** those modules are imported.
+    this **before** those modules are imported. Nothing in ``src/`` enforces that today;
+    it happens to hold because the lazy call inside ``gb_environment_config`` fires while
+    the constants modules are still being imported.
     """
-    global _LOADED_EXTRA_ENVIRONMENT_CONFIGS
+    global _LOADED_EXTRA_ENVIRONMENT_CONFIGS, _REGISTERED_ENV_NAME
     if _LOADED_EXTRA_ENVIRONMENT_CONFIGS:
         return None
     _LOADED_EXTRA_ENVIRONMENT_CONFIGS = True
@@ -528,5 +590,7 @@ def load_extra_environment_configs() -> Optional[GBEnvConfig]:
             return None
 
     config = add_environment_config(config_dict=config_dict)
+    # Remembered so gb_environment() can select it on every later call, not just this one.
+    _REGISTERED_ENV_NAME = config.env
     _log_resolved_config(config, source)
     return config

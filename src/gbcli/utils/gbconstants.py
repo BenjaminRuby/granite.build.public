@@ -10,6 +10,9 @@ from sys import platform
 from gbcommon.types.constants import DEFAULT_GH_DOMAIN, is_public_github
 from gbcommon.types.gbenvconfig import (
     gb_env_normalize,
+)
+from gbcommon.types.gbenvconfig import gb_environment as _common_gb_environment
+from gbcommon.types.gbenvconfig import (
     gb_environment_config,
     getenv_boolean,
     load_extra_environment_configs,
@@ -45,14 +48,16 @@ def gb_env_formating(value: str, type: str) -> str:
 
 
 def gb_environment() -> str:
-    GB_ENVIRONMENT = gb_env_formating(
-        os.environ.get("GB_ENVIRONMENT"), "Environment variable GB_ENVIRONMENT"
-    )
+    """Resolve the selected GB environment, exiting (not raising) on an invalid name.
 
-    if GB_ENVIRONMENT is None:
-        GB_ENVIRONMENT = GB_ENVIRONMENT_DEFAULT
-
-    return GB_ENVIRONMENT
+    Delegates resolution to the shared ``gbenvconfig.gb_environment`` so gbcli picks up
+    auto-selection of a runtime-registered environment and cannot drift from gbserver;
+    only the CLI failure mode differs — an invalid name exits rather than raising.
+    """
+    try:
+        return _common_gb_environment()
+    except ValueError as e:
+        sys.exit(str(e))
 
 
 def hf_token() -> str:
